@@ -84,7 +84,13 @@ function readData() {
   return data;
 }
 
+let disableWrite = false;
+
 function writeData(data) {
+  if (disableWrite) {
+    cachedData = data;
+    return;
+  }
   try {
     fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf8');
   } catch (err) {
@@ -475,12 +481,16 @@ const db = {
     return (...args) => {
       // Begin transaction: cache current state
       const snapshot = JSON.stringify(cachedData);
+      const prevDisableWrite = disableWrite;
+      disableWrite = true;
       try {
         const result = fn(...args);
-        // Commit: write to disk
+        disableWrite = prevDisableWrite;
+        // Commit: write to disk exactly once
         writeData(cachedData);
         return result;
       } catch (err) {
+        disableWrite = prevDisableWrite;
         // Rollback
         cachedData = JSON.parse(snapshot);
         throw err;

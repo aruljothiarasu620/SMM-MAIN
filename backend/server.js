@@ -412,29 +412,39 @@ app.post('/api/admin/import-services', requireAdmin, async (req, res) => {
   const result = await smm.getProviderServices();
   if (!result.success) return res.json({ success: false, message: result.error });
 
-  let imported = 0;
-  for (const s of result.services) {
-    // Map provider platform from category name
-    const platform = guessPlatform(s.category);
-    const exists = db.prepare('SELECT id FROM services WHERE provider_service_id = ?').get(String(s.service));
-    if (!exists) {
-      db.prepare(`
-        INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time, provider_service_id, active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-      `).run(
-        platform,
-        s.name,
-        s.category,
-        parseFloat((s.rate * 1.3).toFixed(4)), // Add 30% margin for your profit
-        s.min,
-        s.max,
-        s.average_time || 'Varies',
-        String(s.service)
-      );
-      imported++;
+  // Use transaction to perform bulk inserts in-memory and write to disk once
+  const runImport = db.transaction((services) => {
+    let imported = 0;
+    for (const s of services) {
+      const platform = guessPlatform(s.category);
+      const exists = db.prepare('SELECT id FROM services WHERE provider_service_id = ?').get(String(s.service));
+      if (!exists) {
+        db.prepare(`
+          INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time, provider_service_id, active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        `).run(
+          platform,
+          s.name,
+          s.category,
+          parseFloat((s.rate * 1.3).toFixed(4)), // Add 30% margin for your profit
+          s.min,
+          s.max,
+          s.average_time || 'Varies',
+          String(s.service)
+        );
+        imported++;
+      }
     }
+    return imported;
+  });
+
+  try {
+    const importedCount = runImport(result.services);
+    res.json({ success: true, message: `Imported ${importedCount} new services`, total: result.services.length });
+  } catch (err) {
+    console.error('Import services transaction failed:', err);
+    res.json({ success: false, message: 'Failed to save imported services: ' + err.message });
   }
-  res.json({ success: true, message: `Imported ${imported} new services`, total: result.services.length });
 });
 
 // Map existing service to a provider service ID
