@@ -32,16 +32,41 @@ function readData() {
   const { execSync } = require('child_process');
   let data;
   
-  // Try loading from Cloud KV first
-  try {
-    console.log('☁️ Fetching SMM database from Cloud KV...');
-    const stdout = execSync('curl -s https://kvdb.io/JS9f9tqBYYq46Qkqi8Z21s/db_json', { timeout: 8000 }).toString().trim();
-    if (stdout && stdout.startsWith('{') && stdout.endsWith('}')) {
-      data = JSON.parse(stdout);
-      console.log('☁️ Successfully loaded SMM database from Cloud KV!');
+  // Try loading from Vercel KV first (REST API)
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    try {
+      console.log('☁️ Fetching SMM database from Vercel KV...');
+      const url = `${process.env.KV_REST_API_URL}/get/db_json`;
+      const token = process.env.KV_REST_API_TOKEN;
+      const stdout = execSync(`curl -s -H "Authorization: Bearer ${token}" "${url}"`, { timeout: 8000 }).toString().trim();
+      
+      if (stdout && stdout.startsWith('{')) {
+        const wrapper = JSON.parse(stdout);
+        if (wrapper && wrapper.result) {
+          const parsed = typeof wrapper.result === 'string' ? JSON.parse(wrapper.result) : wrapper.result;
+          if (parsed && typeof parsed === 'object') {
+            data = parsed;
+            console.log('☁️ Successfully loaded SMM database from Vercel KV!');
+          }
+        }
+      }
+    } catch (err) {
+      console.error('⚠️ Vercel KV fetch failed, falling back:', err.message);
     }
-  } catch (err) {
-    console.error('⚠️ Cloud KV fetch failed, falling back to local file:', err.message);
+  }
+
+  // Fallback to older Cloud KV if Vercel KV not present or failed
+  if (!data) {
+    try {
+      console.log('☁️ Fetching SMM database from Cloud KV...');
+      const stdout = execSync('curl -s https://kvdb.io/JS9f9tqBYYq46Qkqi8Z21s/db_json', { timeout: 8000 }).toString().trim();
+      if (stdout && stdout.startsWith('{') && stdout.endsWith('}')) {
+        data = JSON.parse(stdout);
+        console.log('☁️ Successfully loaded SMM database from Cloud KV!');
+      }
+    } catch (err) {
+      console.error('⚠️ Cloud KV fetch failed, falling back to local file:', err.message);
+    }
   }
 
   // Fallback to local db.json if Cloud KV failed or is empty
@@ -117,20 +142,42 @@ function writeData(data) {
   }
   cachedData = data;
 
-  // Sync to Cloud KV in the background (asynchronous) natively using node fetch
-  fetch('https://kvdb.io/JS9f9tqBYYq46Qkqi8Z21s/db_json', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  }).then(res => {
-    if (res.ok) {
-      console.log('☁️ SMM Cloud KV sync successful!');
-    } else {
-      console.error('⚠️ SMM Cloud KV sync returned status:', res.status);
-    }
-  }).catch(err => {
-    console.error('⚠️ SMM Cloud KV sync failed:', err.message);
-  });
+  // Sync to Vercel KV in the background (asynchronous)
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    const url = `${process.env.KV_REST_API_URL}/set/db_json`;
+    const token = process.env.KV_REST_API_TOKEN;
+    fetch(url, {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(JSON.stringify(data)) // Store double-stringified for safe Redis REST serialization
+    }).then(res => {
+      if (res.ok) {
+        console.log('☁️ Vercel KV sync successful!');
+      } else {
+        console.error('⚠️ Vercel KV sync returned status:', res.status);
+      }
+    }).catch(err => {
+      console.error('⚠️ Vercel KV sync failed:', err.message);
+    });
+  } else {
+    // Fallback to Cloud KV in the background (asynchronous) natively using node fetch
+    fetch('https://kvdb.io/JS9f9tqBYYq46Qkqi8Z21s/db_json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(res => {
+      if (res.ok) {
+        console.log('☁️ SMM Cloud KV sync successful!');
+      } else {
+        console.error('⚠️ SMM Cloud KV sync returned status:', res.status);
+      }
+    }).catch(err => {
+      console.error('⚠️ SMM Cloud KV sync failed:', err.message);
+    });
+  }
 }
 
 // In-memory caching for faster speed and better consistency during a request
