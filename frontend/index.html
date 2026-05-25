@@ -534,7 +534,19 @@ async function api(path, method='GET', body=null) {
   };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
-  return res.json();
+
+  if (res.status === 401) {
+    doLogout();
+    showAlert('loginAlert', 'Session expired. Please login again.', 'error');
+    return { success: false, message: 'Session expired' };
+  }
+
+  const json = await res.json();
+  if (json.success === false && (json.message === 'Invalid token' || json.message === 'Login required')) {
+    doLogout();
+    showAlert('loginAlert', 'Session expired. Please login again.', 'error');
+  }
+  return json;
 }
 
 // =============================================
