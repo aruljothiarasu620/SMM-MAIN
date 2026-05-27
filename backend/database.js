@@ -92,6 +92,72 @@ function readData() {
     }
   }
 
+  // ── Self-healing: Remove duplicate services (by provider_service_id or by name + platform) ──
+  if (data.services && Array.isArray(data.services)) {
+    const seenProviderIds = new Set();
+    const uniqueMap = new Map();
+    let cleaned = false;
+
+    for (const s of data.services) {
+      // 1. Skip if already seen this exact provider service ID
+      if (s.provider_service_id) {
+        const pId = String(s.provider_service_id).trim();
+        if (seenProviderIds.has(pId)) {
+          cleaned = true;
+          continue; // Skip duplicate provider ID
+        }
+        seenProviderIds.add(pId);
+      }
+
+      // 2. Filter duplicate platform + name (keep the one with the lower rate/price)
+      const nameKey = `${s.platform}_${s.name.trim().toLowerCase()}`;
+      if (uniqueMap.has(nameKey)) {
+        cleaned = true;
+        const existing = uniqueMap.get(nameKey);
+        // Keep the one with the lowest rate (best price for client)
+        if (s.rate < existing.rate) {
+          uniqueMap.set(nameKey, s);
+        }
+      } else {
+        uniqueMap.set(nameKey, s);
+      }
+    }
+
+    if (cleaned) {
+      const uniqueServices = Array.from(uniqueMap.values());
+      console.log(`🧹 Database Self-Healing: Cleaned ${data.services.length - uniqueServices.length} duplicate services!`);
+      data.services = uniqueServices;
+      
+      // Re-assign database IDs sequentially (1, 2, 3...) to guarantee database integrity
+      data.services.forEach((s, idx) => {
+        s.id = idx + 1;
+      });
+
+      // Write cleaned database back locally
+      try {
+        fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf8');
+      } catch (e) {
+        console.error('⚠️ Could not save self-healed DB locally:', e);
+      }
+      
+      // Sync self-healed DB to Vercel KV if online
+      if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+        const url = `${process.env.KV_REST_API_URL}/set/db_json`;
+        const token = process.env.KV_REST_API_TOKEN;
+        fetch(url, {
+          method: 'POST',
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(JSON.stringify(data))
+        }).then(res => {
+          if (res.ok) console.log('☁️ Vercel KV sync of self-healed DB successful!');
+        }).catch(err => {});
+      }
+    }
+  }
+
   // Guarantee that aruljothiarasu620@gmail.com exists as an admin with password '123456'
   const adminEmail = 'aruljothiarasu620@gmail.com';
   const adminHash = crypto.createHash('sha256').update('123456').digest('hex');
@@ -241,6 +307,20 @@ class Statement {
       const id = params[0];
       const order = data.orders.find(o => o.id === Number(id));
       return order ? { ...order } : undefined;
+    }
+
+    // 10. SELECT id FROM services WHERE provider_service_id = ?
+    if (this.sql.includes('SELECT id FROM services WHERE provider_service_id = ?')) {
+      const pId = String(params[0]).trim();
+      const svc = data.services.find(s => s.provider_service_id && String(s.provider_service_id).trim() === pId);
+      return svc ? { id: svc.id } : undefined;
+    }
+
+    // 11. SELECT id, rate FROM services WHERE platform = ? AND LOWER(name) = ?
+    if (this.sql.includes('SELECT id, rate FROM services WHERE platform = ? AND LOWER(name) = ?')) {
+      const [platform, name] = params;
+      const svc = data.services.find(s => s.platform === platform && s.name.trim().toLowerCase() === name.trim().toLowerCase());
+      return svc ? { id: svc.id, rate: svc.rate } : undefined;
     }
 
     console.log('UNHANDLED GET QUERY:', this.sql, params);
@@ -463,6 +543,16 @@ class Statement {
       });
       lastInsertRowid = id;
       changes = 1;
+    }
+    // 17. UPDATE services SET rate = ?, provider_service_id = ? WHERE id = ?
+    else if (this.sql.includes('UPDATE services SET rate = ?, provider_service_id = ? WHERE id = ?')) {
+      const [rate, provider_service_id, id] = params;
+      const svc = data.services.find(s => s.id === Number(id));
+      if (svc) {
+        svc.rate = rate;
+        svc.provider_service_id = provider_service_id;
+        changes = 1;
+      }
     }
 
     writeData(data);

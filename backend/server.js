@@ -418,23 +418,38 @@ app.post('/api/admin/import-services', requireAdmin, async (req, res) => {
     let imported = 0;
     for (const s of services) {
       const platform = guessPlatform(s.category);
+      
+      // 1. Check if duplicate provider ID exists
       const exists = db.prepare('SELECT id FROM services WHERE provider_service_id = ?').get(String(s.service));
-      if (!exists) {
-        db.prepare(`
-          INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time, provider_service_id, active)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-        `).run(
-          platform,
-          s.name,
-          s.category,
-          parseFloat((s.rate * 1.3).toFixed(4)), // Add 30% margin for your profit
-          s.min,
-          s.max,
-          s.average_time || 'Varies',
-          String(s.service)
-        );
-        imported++;
+      if (exists) continue;
+
+      // 2. Check if duplicate platform + name exists (case-insensitive)
+      const existsByName = db.prepare('SELECT id, rate FROM services WHERE platform = ? AND LOWER(name) = ?').get(platform, s.name.trim().toLowerCase());
+      if (existsByName) {
+        // Auto-update if the new rate is cheaper
+        const newRate = parseFloat((s.rate * 1.3).toFixed(4));
+        if (newRate < existsByName.rate) {
+          db.prepare('UPDATE services SET rate = ?, provider_service_id = ? WHERE id = ?')
+            .run(newRate, String(s.service), existsByName.id);
+        }
+        continue; // Skip duplicate service insertion
       }
+
+      // 3. Insert unique service
+      db.prepare(`
+        INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time, provider_service_id, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `).run(
+        platform,
+        s.name,
+        s.category,
+        parseFloat((s.rate * 1.3).toFixed(4)), // Add 30% margin for your profit
+        s.min,
+        s.max,
+        s.average_time || 'Varies',
+        String(s.service)
+      );
+      imported++;
     }
     return imported;
   });
