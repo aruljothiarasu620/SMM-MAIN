@@ -251,8 +251,19 @@ function writeData(data) {
   }
 }
 
-// In-memory caching for faster speed and better consistency during a request
-let cachedData = readData();
+// Time-based and forced caching layer to maintain consistency across Vercel serverless containers
+let cachedData = null;
+let lastFetchTime = 0;
+const CACHE_TTL_MS = 1500; // Cache for 1.5 seconds to avoid multiple fetches during a single API request
+
+function getFreshData(force = false) {
+  const now = Date.now();
+  if (force || !cachedData || (now - lastFetchTime > CACHE_TTL_MS)) {
+    cachedData = readData();
+    lastFetchTime = now;
+  }
+  return cachedData;
+}
 
 class Statement {
   constructor(sql) {
@@ -260,7 +271,7 @@ class Statement {
   }
 
   get(...params) {
-    const data = cachedData;
+    const data = getFreshData();
     // 1. SELECT id FROM users WHERE email = ?
     if (this.sql.includes('SELECT id FROM users WHERE email = ?')) {
       const email = params[0];
@@ -333,7 +344,7 @@ class Statement {
   }
 
   run(...params) {
-    const data = cachedData;
+    const data = getFreshData(true); // Force fresh read to avoid overwrite
     let lastInsertRowid = 0;
     let changes = 0;
 
@@ -565,7 +576,7 @@ class Statement {
   }
 
   all(...params) {
-    const data = cachedData;
+    const data = getFreshData();
     // 1. SELECT * FROM services WHERE active = 1
     if (this.sql.includes('SELECT * FROM services WHERE active = 1')) {
       return data.services.filter(s => s.active === 1);
@@ -653,8 +664,9 @@ const db = {
   exec: (stmt) => {},
   prepare: (sql) => new Statement(sql),
   dangerouslyResetServices: () => {
-    cachedData.services = [];
-    writeData(cachedData);
+    const data = getFreshData(true); // Force fresh load
+    data.services = [];
+    writeData(data);
   },
   syncCloud: async () => {
     if (pendingSyncPromise) {
@@ -664,7 +676,8 @@ const db = {
   },
   transaction: (fn) => {
     return (...args) => {
-      // Begin transaction: cache current state
+      // Ensure we have the latest state before beginning transaction
+      getFreshData(true);
       const snapshot = JSON.stringify(cachedData);
       const prevDisableWrite = disableWrite;
       disableWrite = true;
