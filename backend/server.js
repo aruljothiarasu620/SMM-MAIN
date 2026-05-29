@@ -464,24 +464,31 @@ app.post('/api/admin/import-services', requireAdmin, async (req, res) => {
   // Use transaction to perform bulk inserts in-memory and write to disk once
   const runImport = db.transaction((services) => {
     let imported = 0;
+    let updated = 0;
     for (const s of services) {
       const platform = guessPlatform(s.category);
-      
-      // 1. Check if duplicate provider ID exists
-      const exists = db.prepare('SELECT id FROM services WHERE provider_service_id = ?').get(String(s.service));
-      if (exists) continue;
+      const newRate = parseFloat((s.rate * 2.0).toFixed(4));
 
-      // 2. Check if duplicate platform + name exists (case-insensitive)
-      const existsByName = db.prepare('SELECT id, rate FROM services WHERE platform = ? AND LOWER(name) = ?').get(platform, s.name.trim().toLowerCase());
-      if (existsByName) {
-        // Always update rate to current markup (100%) + update provider_service_id
-        const newRate = parseFloat((s.rate * 2.0).toFixed(4));
-        db.prepare('UPDATE services SET rate = ?, provider_service_id = ?, min_qty = ?, max_qty = ? WHERE id = ?')
-          .run(newRate, String(s.service), s.min, s.max, existsByName.id);
-        continue; // Skip re-inserting, just updated
+      // 1. If provider_service_id already exists → update rate to 100% markup
+      const exists = db.prepare('SELECT id FROM services WHERE provider_service_id = ?').get(String(s.service));
+      if (exists) {
+        db.prepare('UPDATE services SET rate = ?, min_qty = ?, max_qty = ? WHERE id = ?')
+          .run(newRate, s.min, s.max, exists.id);
+        updated++;
+        continue;
       }
 
-      // 3. Insert unique service
+      // 2. Check if duplicate platform + name exists (case-insensitive)
+      const existsByName = db.prepare('SELECT id FROM services WHERE platform = ? AND LOWER(name) = ?').get(platform, s.name.trim().toLowerCase());
+      if (existsByName) {
+        // Update rate + link provider_service_id
+        db.prepare('UPDATE services SET rate = ?, provider_service_id = ?, min_qty = ?, max_qty = ? WHERE id = ?')
+          .run(newRate, String(s.service), s.min, s.max, existsByName.id);
+        updated++;
+        continue;
+      }
+
+      // 3. Insert brand new service
       db.prepare(`
         INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time, provider_service_id, active)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
@@ -489,7 +496,7 @@ app.post('/api/admin/import-services', requireAdmin, async (req, res) => {
         platform,
         s.name,
         s.category,
-        parseFloat((s.rate * 2.0).toFixed(4)), // Add 100% margin for your profit
+        newRate, // 100% margin for your profit
         s.min,
         s.max,
         s.average_time || 'Varies',
@@ -497,13 +504,13 @@ app.post('/api/admin/import-services', requireAdmin, async (req, res) => {
       );
       imported++;
     }
-    return imported;
+    return { imported, updated };
   });
 
   try {
-    const importedCount = runImport(result.services);
+    const { imported, updated } = runImport(result.services);
     await db.syncCloud(); // Ensure cloud sync completes in serverless
-    res.json({ success: true, message: `Imported ${importedCount} new services`, total: result.services.length });
+    res.json({ success: true, message: `✅ ${updated} services updated to 100% markup, ${imported} new services added`, total: result.services.length });
   } catch (err) {
     console.error('Import services transaction failed:', err);
     res.json({ success: false, message: 'Failed to save imported services: ' + err.message });
