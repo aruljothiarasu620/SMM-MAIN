@@ -557,7 +557,7 @@ class Statement {
         max_qty,
         delivery_time,
         provider_service_id,
-        active
+        active: active !== undefined ? active : 1
       });
       lastInsertRowid = id;
       changes = 1;
