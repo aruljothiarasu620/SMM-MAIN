@@ -273,6 +273,11 @@ let lastFetchTime = 0;
 const CACHE_TTL_MS = 1500; // Cache for 1.5 seconds to avoid multiple fetches during a single API request
 
 function getFreshData(force = false) {
+  // If we are in the middle of a transaction, return cachedData immediately to preserve transactional state
+  if (disableWrite && cachedData) {
+    return cachedData;
+  }
+
   const now = Date.now();
   if (force || !cachedData || (now - lastFetchTime > CACHE_TTL_MS)) {
     cachedData = readData();
