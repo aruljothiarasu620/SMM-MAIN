@@ -430,7 +430,7 @@ app.post('/api/admin/import-services', requireAdmin, async (req, res) => {
       const existsByName = db.prepare('SELECT id, rate FROM services WHERE platform = ? AND LOWER(name) = ?').get(platform, s.name.trim().toLowerCase());
       if (existsByName) {
         // Auto-update if the new rate is cheaper
-        const newRate = parseFloat((s.rate * 1.3).toFixed(4));
+        const newRate = parseFloat((s.rate * 2.0).toFixed(4));
         if (newRate < existsByName.rate) {
           db.prepare('UPDATE services SET rate = ?, provider_service_id = ? WHERE id = ?')
             .run(newRate, String(s.service), existsByName.id);
@@ -446,7 +446,7 @@ app.post('/api/admin/import-services', requireAdmin, async (req, res) => {
         platform,
         s.name,
         s.category,
-        parseFloat((s.rate * 1.3).toFixed(4)), // Add 30% margin for your profit
+        parseFloat((s.rate * 2.0).toFixed(4)), // Add 100% margin for your profit
         s.min,
         s.max,
         s.average_time || 'Varies',
