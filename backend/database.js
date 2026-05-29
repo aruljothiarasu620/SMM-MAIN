@@ -652,6 +652,10 @@ const db = {
   pragma: (stmt) => {},
   exec: (stmt) => {},
   prepare: (sql) => new Statement(sql),
+  dangerouslyResetServices: () => {
+    cachedData.services = [];
+    writeData(cachedData);
+  },
   syncCloud: async () => {
     if (pendingSyncPromise) {
       console.log('⏳ Awaiting pending Vercel KV cloud sync...');

@@ -416,6 +416,17 @@ app.get('/api/admin/debug-db', requireAdmin, (req, res) => {
   });
 });
 
+// Reset all services (admin only)
+app.post('/api/admin/reset-services', requireAdmin, async (req, res) => {
+  try {
+    db.dangerouslyResetServices();
+    await db.syncCloud();
+    res.json({ success: true, message: 'All services successfully reset. Re-import can now be executed.' });
+  } catch (err) {
+    res.json({ success: false, message: err.message });
+  }
+});
+
 // =============================================
 // SMM PROVIDER ADMIN ROUTES
 // =============================================
