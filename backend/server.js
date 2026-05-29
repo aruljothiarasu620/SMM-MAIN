@@ -24,6 +24,27 @@ const razorpay = new Razorpay({
 });
 
 // =============================================
+// WHATSAPP NOTIFICATION (CallMeBot - Free)
+// =============================================
+async function sendWhatsApp(message) {
+  const phone = process.env.ADMIN_WHATSAPP_PHONE;
+  const apikey = process.env.CALLMEBOT_APIKEY;
+  if (!phone || !apikey || apikey === 'YOUR_CALLMEBOT_APIKEY') {
+    console.log('📵 WhatsApp not configured — skipping notification');
+    return;
+  }
+  try {
+    const encoded = encodeURIComponent(message);
+    const url = `https://api.callmebot.com/whatsapp.php?phone=${phone}&text=${encoded}&apikey=${apikey}`;
+    const res = await fetch(url);
+    const text = await res.text();
+    console.log(`📲 WhatsApp sent: ${text.substring(0, 60)}`);
+  } catch (err) {
+    console.error('WhatsApp send failed:', err.message);
+  }
+}
+
+// =============================================
 // AUTH ROUTES
 // =============================================
 
@@ -186,6 +207,7 @@ app.post('/api/orders', requireAuth, async (req, res) => {
   const order_id = result.lastInsertRowid;
 
   // ── Forward to SMM Provider ──
+  let providerStatus = 'pending';
   if (service.provider_service_id) {
     try {
       const smmResult = await smm.placeOrder({
@@ -198,18 +220,21 @@ app.post('/api/orders', requireAuth, async (req, res) => {
         // Save provider order ID + mark as processing
         db.prepare(`UPDATE orders SET provider_order_id = ?, status = 'processing' WHERE id = ?`)
           .run(smmResult.provider_order_id, order_id);
+        providerStatus = 'processing';
         console.log(`✅ Order #${order_id} → Provider order #${smmResult.provider_order_id}`);
       } else {
-        // Provider failed — refund the user
-        db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').run(charge, req.userId);
-        db.prepare(`UPDATE orders SET status = 'failed', notes = ? WHERE id = ?`)
-          .run(smmResult.error, order_id);
-        return res.json({ success: false, message: `Provider error: ${smmResult.error}` });
+        // Provider failed (e.g. insufficient balance) — HOLD as pending, DO NOT refund
+        // Admin will be notified via WhatsApp to top-up and retry
+        db.prepare(`UPDATE orders SET status = 'pending', notes = ? WHERE id = ?`)
+          .run('Awaiting admin: ' + smmResult.error, order_id);
+        providerStatus = 'pending';
+        console.warn(`⚠️ Order #${order_id} held pending — provider error: ${smmResult.error}`);
       }
     } catch (err) {
       // Network error — mark for retry
       db.prepare(`UPDATE orders SET status = 'retry', notes = ? WHERE id = ?`)
         .run(err.message, order_id);
+      providerStatus = 'retry';
       console.error(`⚠️ Order #${order_id} queued for retry:`, err.message);
     }
   } else {
@@ -217,10 +242,21 @@ app.post('/api/orders', requireAuth, async (req, res) => {
     console.log(`⚠️ Service ${service_id} has no provider_service_id mapped`);
   }
 
+  // ── Notify Admin via WhatsApp ──
+  const waMsg = `🛒 *New Order #${order_id}*\n` +
+    `👤 Customer: ${user.name}\n` +
+    `📦 Service: ${service.name}\n` +
+    `🔗 Link: ${link}\n` +
+    `🔢 Qty: ${quantity}\n` +
+    `💰 Charged: ₹${charge}\n` +
+    `📊 Status: ${providerStatus.toUpperCase()}\n` +
+    (providerStatus === 'pending' ? `⚠️ EasySmmPanel balance check karein & retry karein!` : `✅ Sent to provider`);
+  sendWhatsApp(waMsg); // fire and forget
+
   await db.syncCloud(); // Ensure cloud sync completes in serverless
   res.json({
     success: true,
-    message: 'Order placed successfully!',
+    message: 'Order placed successfully! It will be processed shortly.',
     order_id,
     charge,
     new_balance: parseFloat((user.balance - charge).toFixed(2)),
@@ -300,9 +336,18 @@ app.post('/api/payment/verify', requireAuth, async (req, res) => {
   db.prepare('UPDATE transactions SET status = ?, razorpay_payment_id = ? WHERE id = ?')
     .run('paid', razorpay_payment_id, txn.id);
 
-  const user = db.prepare('SELECT balance FROM users WHERE id = ?').get(req.userId);
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.userId);
+
+  // ── Notify Admin via WhatsApp ──
+  const payMsg = `💰 *Payment Received!*\n` +
+    `👤 Customer: ${user.name} (${user.email})\n` +
+    `💵 Amount: ₹${txn.amount}\n` +
+    `💳 Payment ID: ${razorpay_payment_id}\n` +
+    `👛 New Wallet Balance: ₹${(user.balance + txn.amount).toFixed(2)}`;
+  sendWhatsApp(payMsg); // fire and forget
+
   await db.syncCloud(); // Ensure cloud sync completes in serverless
-  res.json({ success: true, message: `₹${txn.amount} added to wallet!`, new_balance: user.balance });
+  res.json({ success: true, message: `₹${txn.amount} added to wallet!`, new_balance: user.balance + txn.amount });
 });
 
 // Transaction history
