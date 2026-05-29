@@ -714,46 +714,4 @@ const db = {
   }
 };
 
-// Seed default services if database is empty
-const count = db.prepare('SELECT COUNT(*) as c FROM services').get().c;
-if (count === 0) {
-  const insert = db.prepare(`
-    INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const services = [
-    // Instagram
-    ['instagram', 'Instagram Followers', 'Real-looking followers, no drop', 0.80, 100, 10000, '0-1 hour'],
-    ['instagram', 'Instagram Likes', 'Fast likes, high quality', 0.50, 50, 50000, 'Instant'],
-    ['instagram', 'Instagram Views', 'Reel & post views', 0.30, 100, 1000000, 'Instant'],
-    ['instagram', 'Instagram Story Views', 'Story view boost', 0.40, 100, 100000, '0-30 min'],
-    ['instagram', 'Instagram Comments', 'Custom comments', 5.00, 10, 1000, '1-2 hours'],
-    ['instagram', 'Instagram Saves', 'Post saves', 0.60, 100, 50000, 'Instant'],
-
-    // YouTube
-    ['youtube', 'YouTube Views', 'High retention views', 1.20, 500, 1000000, '1-3 hours'],
-    ['youtube', 'YouTube Subscribers', 'Real-looking subscribers', 2.00, 100, 50000, '2-6 hours'],
-    ['youtube', 'YouTube Likes', 'Video likes', 0.90, 100, 10000, 'Instant'],
-    ['youtube', 'YouTube Watch Hours', '4000 hours package', 15.00, 1, 10, '3-5 days'],
-
-    // Facebook
-    ['facebook', 'Facebook Page Likes', 'Page like boost', 0.60, 100, 10000, '1-2 hours'],
-    ['facebook', 'Facebook Post Likes', 'Post likes', 0.40, 50, 10000, 'Instant'],
-    ['facebook', 'Facebook Followers', 'Profile followers', 0.70, 100, 10000, '1-3 hours'],
-
-    // TikTok
-    ['tiktok', 'TikTok Followers', 'TikTok follower boost', 1.00, 100, 50000, '1-2 hours'],
-    ['tiktok', 'TikTok Views', 'Video view boost', 0.20, 1000, 1000000, 'Instant'],
-    ['tiktok', 'TikTok Likes', 'Video likes', 0.80, 100, 50000, 'Instant'],
-  ];
-
-  const insertMany = db.transaction((rows) => {
-    for (const row of rows) insert.run(...row);
-  });
-
-  insertMany(services);
-  console.log('✅ Services seeded successfully');
-}
-
 module.exports = db;
