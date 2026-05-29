@@ -511,25 +511,6 @@ class Statement {
         changes = 1;
       }
     }
-    // 15. INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time)
-    else if (this.sql.includes('INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time')) {
-      const [platform, name, description, rate, min_qty, max_qty, delivery_time] = params;
-      const id = data.services.length > 0 ? Math.max(...data.services.map(s => s.id)) + 1 : 1;
-      data.services.push({
-        id,
-        platform,
-        name,
-        description,
-        rate,
-        min_qty,
-        max_qty,
-        delivery_time,
-        provider_service_id: null,
-        active: 1
-      });
-      lastInsertRowid = id;
-      changes = 1;
-    }
     // 16. INSERT INTO services with 9 columns (importing services)
     else if (this.sql.includes('INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time, provider_service_id, active)')) {
       const [platform, name, description, rate, min_qty, max_qty, delivery_time, provider_service_id, active] = params;
@@ -545,6 +526,25 @@ class Statement {
         delivery_time,
         provider_service_id,
         active
+      });
+      lastInsertRowid = id;
+      changes = 1;
+    }
+    // 15. INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time)
+    else if (this.sql.includes('INSERT INTO services (platform, name, description, rate, min_qty, max_qty, delivery_time')) {
+      const [platform, name, description, rate, min_qty, max_qty, delivery_time] = params;
+      const id = data.services.length > 0 ? Math.max(...data.services.map(s => s.id)) + 1 : 1;
+      data.services.push({
+        id,
+        platform,
+        name,
+        description,
+        rate,
+        min_qty,
+        max_qty,
+        delivery_time,
+        provider_service_id: null,
+        active: 1
       });
       lastInsertRowid = id;
       changes = 1;
