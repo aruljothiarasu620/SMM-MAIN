@@ -328,6 +328,12 @@ class Statement {
       const user = data.users.find(u => u.email === email);
       return user ? { id: user.id } : undefined;
     }
+    // 1b. SELECT * FROM users WHERE email = ?
+    if (this.sql.includes('SELECT * FROM users WHERE email = ?') && !this.sql.includes('AND password')) {
+      const email = params[0];
+      const user = data.users.find(u => u.email === email);
+      return user ? { ...user } : undefined;
+    }
     // 2. SELECT * FROM users WHERE email = ? AND password = ?
     if (this.sql.includes('SELECT * FROM users WHERE email = ? AND password = ?')) {
       const [email, password] = params;
